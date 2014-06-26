@@ -39,6 +39,8 @@ typedef struct
 #define EEPROM_BASE       0xA0
 #define EEPROM_SIGNATURE  0x55
 
+float Rad2Deg = (180/M_PI) ;
+
 // MPU control/status vars
 bool dmpReady = false;   // Set true if DMP init was successful
 bool dmpLoaded = false;  // Set true if DMP loaded  successfuly
@@ -56,16 +58,13 @@ Quaternion q;           // [w, x, y, z] Quaternion container
 VectorInt16 acc;        // [x, y, z]    Accel sensor measurements
 VectorFloat gravity;    // [x, y, z]    Gravity vector
 
-float Rad2Deg = (180/M_PI) ;
-
-// trame for message 
 _hat_data_packet hatData;
 _msg_info msgInfo;
 _sensor_data calibrationData;
 
 bool       askCalibrate = false;  // Set true when calibrating is requested
 int        cptCal =  0;
-const int  numCalibrationSteps = 100;
+const int  numCalibrationSteps = 200;
 
 volatile bool mpuInterrupt = false;  // Indicates whether MPU interrupt pin has gone high
 
@@ -179,7 +178,7 @@ void ResetCalibrationOffsets() {
 }
 
 // ================================================================
-// ===                    READ CALIBRATION DATA                 ===
+// ===               READ EEPROM OFFSET DATA                    ===
 // ================================================================
 void ReadEepromOffsetData() {
   _sensor_data eprom_data;
