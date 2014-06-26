@@ -12,9 +12,7 @@
 #include "I2Cdev.h"
 #include "MPU6050_9Axis_MotionApps41.h"
 
-
 MPU6050 mpu;
-
 
 typedef struct  {
   int16_t  Begin  ;   // 2  Debut
@@ -33,20 +31,22 @@ typedef struct  {
 
 typedef struct 
 {
-  byte   rate;
-  double gyro_offset[3] ;
-  double acc_offset[3]  ;
+  byte   sig_hat;
+  double gyro_offset[3];
+  double acc_offset[3];
 } _eprom_save;
 
+#define EEPROM_BASE 0xA0
+#define EEPROM_SIGNATURE 0x55
 
 // MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
+bool dmpReady = false;   // set true if DMP init was successful
 bool dmpLoaded = false;  // set true if DMP loaded  successfuly
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
+uint8_t mpuIntStatus;    // holds actual interrupt status byte from MPU
+uint8_t devStatus;       // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;     // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;      // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64];  // FIFO storage buffer
 
 char Commande;
 char Version[] = "HAT V 1.00";
@@ -63,13 +63,9 @@ _hatire hatire;
 _msginfo msginfo;
 _eprom_save eprom_save;
 
-
-bool   AskCalibrate = false;  // set true when calibrating is ask
-int    CptCal =  0;
-const int    NbCal = 5; 
-
-
-
+bool       AskCalibrate = false;  // set true when calibrating is ask
+int        CptCal =  0;
+const int  NbCal = 100; 
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -138,9 +134,9 @@ void setup() {
   if (devStatus == 0) {
     dmpLoaded=true;
 
-    // Read Epprom saved params
+    // Read custom offset values, saved into eeprom by calibration sketch, for the specific mpu-6050 device.
     PrintCodeSerial(3005,"Reading saved params...",true);
-    ReadParams();
+    ReadCalibrationData();
 
     // turn on the DMP, now that it's ready
     PrintCodeSerial(3006,"Enabling DMP...",true);
@@ -186,23 +182,28 @@ void razoffset() {
   eprom_save.acc_offset[2] = 0;
 }
 
+// ================================================================
+// ===                    READ CALIBRATION DATA                 ===
+// ================================================================
 
-// ================================================================
-// ===                    SAVE PARAMS                           ===
-// ================================================================
-void SaveParams() {
-  eeprom_write_block((const void*)&eprom_save, (void*) 0, sizeof(eprom_save));
+void ReadCalibrationData() {
+  _eprom_save eprom_data;
+  eeprom_read_block( (void*)&eprom_data, (void*) EEPROM_BASE, sizeof(eprom_data));
+  if (eprom_data.sig_hat == EEPROM_SIGNATURE) {
+    mpu.setXAccelOffset(eprom_data.acc_offset[0]);
+    mpu.setYAccelOffset(eprom_data.acc_offset[1]);
+    mpu.setZAccelOffset(eprom_data.acc_offset[2]);
+    mpu.setXGyroOffset(eprom_data.gyro_offset[0]);
+    mpu.setYGyroOffset(eprom_data.gyro_offset[1]);
+    mpu.setZGyroOffset(eprom_data.gyro_offset[2]);
+    Serial.println(eprom_data.acc_offset[0]);
+    Serial.println(eprom_data.acc_offset[1]);
+    Serial.println(eprom_data.acc_offset[2]);
+    Serial.println(eprom_data.gyro_offset[0]);
+    Serial.println(eprom_data.gyro_offset[1]);
+    Serial.println(eprom_data.gyro_offset[2]);
+  }
 }
-
-
-
-// ================================================================
-// ===                    READ PARAMS                           ===
-// ================================================================
-void ReadParams() {
-  eeprom_read_block( (void*)&eprom_save, (void*) 0, sizeof(eprom_save));
-}
-
 
 // ================================================================
 // ===                    Serial Command                        ===
@@ -248,7 +249,6 @@ void serialEvent(){
     }
     break;      
 
-
   case 'C':
     CptCal=0;
     razoffset();  
@@ -278,8 +278,7 @@ void serialEvent(){
   	  Serial.println();
     }
     break;      
-
-
+    
   default:
     break;
   }	
@@ -293,10 +292,8 @@ void loop() {
   // Leonardo BUG (simul Serial Event)
   if(Serial.available() > 0)  serialEvent();
 
-
   // if programming failed, don't try to do anything
   if (dmpReady)  { 
-
 
     while (!mpuInterrupt && fifoCount < packetSize) ;
 
@@ -315,7 +312,7 @@ void loop() {
       hatire.Cpt=0;
 
       // otherwise, check for DMP data ready interrupt (this should happen frequently)
-    } 
+    }
     else if (mpuIntStatus & 0x02) {
       // wait for correct available data length, should be a VERY short wait
       while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
@@ -336,6 +333,12 @@ void loop() {
       // not used in this script
       // mpu.dmpGetAccel(&aa, fifoBuffer);
       // mpu.dmpGetLinearAccel(&hatire.acc, &aa, &gravity);
+//      Serial.println(mpu.getXNegMotionDetected());
+//      Serial.println(mpu.getXPosMotionDetected());
+//      Serial.println(mpu.getYNegMotionDetected());
+//      Serial.println(mpu.getYPosMotionDetected());
+//      Serial.println(mpu.getZNegMotionDetected());
+//      Serial.println(mpu.getZPosMotionDetected());
 
       // Calibration sur X mesures  
       if (AskCalibrate) {
@@ -345,7 +348,6 @@ void loop() {
           eprom_save.gyro_offset[1] = eprom_save.gyro_offset[1] / NbCal ;
           eprom_save.gyro_offset[2] = eprom_save.gyro_offset[2] / NbCal ;
           AskCalibrate=false;
-          SaveParams();
         } 
         else {
           eprom_save.gyro_offset[0] += (float) hatire.gyro[0];
@@ -355,7 +357,6 @@ void loop() {
           CptCal++;
         }
       }
-
 
       // Conversion angles Euler en +-180 Degr�es
       for (int i=0; i <= 2; i++) {
