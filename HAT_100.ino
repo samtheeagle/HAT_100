@@ -1,11 +1,11 @@
-// Arduino sketch for MPU6050 on NanoWII using DMP MotionApps v4.1 
+// Arduino sketch for MPU6050 using DMP MotionApps v4.1 
+// HAT 26/06/2014 by samtheeagle
 // HAT 14/04/2013 by FuraX49
 //
-// Head Arduino Tracker  for FaceTrackNoIR 
+// Head Arduino Tracker for FaceTrackNoIR 
 //   http://facetracknoir.sourceforge.net/home/default.htm	
 // I2C device class (I2Cdev)
 //   https://github.com/jrowberg/i2cdevlib
-
 
 #include <avr/eeprom.h>
 #include <Wire.h>
@@ -15,63 +15,63 @@
 MPU6050 mpu;
 
 typedef struct  {
-  int16_t  Begin  ;   // 2  Debut
-  uint16_t Cpt ;      // 2  Compteur trame or Code info or error
-  float    gyro[3];   // 12 [Y, P, R]    gyro
-  float    acc[3];    // 12 [x, y, z]    Acc
-  int16_t  End ;      // 2  Fin
-} _hatire;
+  int16_t  begin  ;   // 2  Begin
+  uint16_t cpt ;      // 2  Compteur Frame or Code info or error
+  float    gyro[3];   // 12 [Y, P, R] Gyro
+  float    acc[3];    // 12 [x, y, z] Acc
+  int16_t  end ;      // 2  End
+} _hat_data_packet;
 
 typedef struct  {
-  int16_t  Begin  ;   // 2  Debut
-  uint16_t Code ;     // 2  Code info
-  char     Msg[24];   // 24 Message
-  int16_t  End ;      // 2  Fin
-} _msginfo;
+  int16_t  begin  ;   // 2  Begin
+  uint16_t code ;     // 2  Code info
+  char     msg[24];   // 24 Message
+  int16_t  end ;      // 2  End
+} _msg_info;
 
 typedef struct 
 {
   byte   sig_hat;
   double gyro_offset[3];
   double acc_offset[3];
-} _eprom_save;
+} _sensor_data;
 
-#define EEPROM_BASE 0xA0
-#define EEPROM_SIGNATURE 0x55
+#define EEPROM_BASE       0xA0
+#define EEPROM_SIGNATURE  0x55
 
 // MPU control/status vars
-bool dmpReady = false;   // set true if DMP init was successful
-bool dmpLoaded = false;  // set true if DMP loaded  successfuly
-uint8_t mpuIntStatus;    // holds actual interrupt status byte from MPU
-uint8_t devStatus;       // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;     // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;      // count of all bytes currently in FIFO
+bool dmpReady = false;   // Set true if DMP init was successful
+bool dmpLoaded = false;  // Set true if DMP loaded  successfuly
+uint8_t mpuIntStatus;    // Holds actual interrupt status byte from MPU
+uint8_t devStatus;       // Return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;     // Expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;      // Count of all bytes currently in FIFO
 uint8_t fifoBuffer[64];  // FIFO storage buffer
 
-char Commande;
-char Version[] = "HAT V 1.00";
+char command;
+char version[] = "HAT V 1.00";
 
-// orientation/motion vars
-Quaternion q;           // [w, x, y, z]         quaternion container
-VectorInt16 aa;         // [x, y, z]            accel sensor measurements
-VectorFloat gravity;    // [x, y, z]            gravity vector
+// Orientation/motion vars
+Quaternion q;           // [w, x, y, z] Quaternion container
+VectorInt16 acc;        // [x, y, z]    Accel sensor measurements
+VectorFloat gravity;    // [x, y, z]    Gravity vector
 
 float Rad2Deg = (180/M_PI) ;
 
 // trame for message 
-_hatire hatire;
-_msginfo msginfo;
-_eprom_save eprom_save;
+_hat_data_packet hatData;
+_msg_info msgInfo;
+_sensor_data calibrationData;
 
-bool       AskCalibrate = false;  // set true when calibrating is ask
-int        CptCal =  0;
-const int  NbCal = 100; 
+bool       askCalibrate = false;  // Set true when calibrating is requested
+int        cptCal =  0;
+const int  numCalibrationSteps = 100;
+
+volatile bool mpuInterrupt = false;  // Indicates whether MPU interrupt pin has gone high
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
 // ================================================================
-volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-
 void dmpDataReady() {
   mpuInterrupt = true;
 }
@@ -79,43 +79,40 @@ void dmpDataReady() {
 // ================================================================
 // ===               PRINT SERIAL FORMATTE                      ===
 // ================================================================
-void PrintCodeSerial(uint16_t code,char Msg[24],bool EOL ) {
-  msginfo.Code=code;
-  memset(msginfo.Msg,0x00,24);
-  strcpy(msginfo.Msg,Msg);
-  if (EOL) msginfo.Msg[23]=0x0A;
-  // Send HATIRE message to  PC
-  Serial.write((byte*)&msginfo,30);
+void PrintCodeSerial(uint16_t code,char msg[24],bool EOL ) {
+  msgInfo.code=code;
+  memset(msgInfo.msg,0x00,24);
+  strcpy(msgInfo.msg,msg);
+  if (EOL) msgInfo.msg[23]=0x0A;
+  Serial.write((byte*)&msgInfo,30);
 }
-
 
 // ================================================================
 // ===                      INITIAL SETUP                       ===
 // ================================================================
-
 void setup() {
-  // join I2C bus (I2Cdev library doesn't do this automatically)
+  // Join I2C bus (I2Cdev library doesn't do this automatically)
   Wire.begin();
 
-  // initialize serial communication
-  while (!Serial); // wait for Leonardo enumeration, others continue immediately
+  // Initialize serial communication
+  while (!Serial); // Wait for Leonardo enumeration, others continue immediately
 
   Serial.begin(115200);
-  PrintCodeSerial(2000,Version,true);
+  PrintCodeSerial(2000,version,true);
 
-  hatire.Begin=0xAAAA;
-  hatire.Cpt=0;
-  hatire.End=0x5555;
+  hatData.begin=0xAAAA;
+  hatData.cpt=0;
+  hatData.end=0x5555;
 
-  msginfo.Begin=0xAAAA;
-  msginfo.Code=0;
-  msginfo.End=0x5555;
+  msgInfo.begin=0xAAAA;
+  msgInfo.code=0;
+  msgInfo.end=0x5555;
 
-  // initialize device
+  // Initialize device
   PrintCodeSerial(3001,"Initializing I2C",true);
   mpu.initialize();
 
-  // verify connection
+  // Verify connection
   PrintCodeSerial(3002,"Testing connections",true);
 
   if (mpu.testConnection()){
@@ -124,33 +121,33 @@ void setup() {
      PrintCodeSerial(9007,"MPU6050 ERRROR CNX",true);
   }
 
-  while (Serial.available() && Serial.read()); // empty buffer
+  while (Serial.available() && Serial.read()); // Empty buffer
 
-  // load and configure the DMP
+  // Load and configure the DMP
   PrintCodeSerial(3004,"Initializing DMP...",true);
   devStatus = mpu.dmpInitialize();
 
-  // make sure it worked (returns 0 if so)
+  // Make sure it worked (returns 0 if so)
   if (devStatus == 0) {
     dmpLoaded=true;
-
-    // Read custom offset values, saved into eeprom by calibration sketch, for the specific mpu-6050 device.
-    PrintCodeSerial(3005,"Reading saved params...",true);
-    ReadCalibrationData();
-
-    // turn on the DMP, now that it's ready
+    // Read custom offset values, saved into eeprom by calibration sketch, for the specific mpu-6050 device
+    PrintCodeSerial(3005,"Reading saved offset params from EEPROM...",true);
+    ReadEepromOffsetData();
+    
+    // Turn on the DMP, now that it's ready
     PrintCodeSerial(3006,"Enabling DMP...",true);
     mpu.setDMPEnabled(true);
-
-    // enable Arduino interrupt detection
+    
+    // Enable Arduino interrupt detection
     PrintCodeSerial(3007,"Enabling interrupt",true);
     attachInterrupt(0, dmpDataReady, RISING);
     mpuIntStatus = mpu.getIntStatus();
-
-    // set our DMP Ready flag so the main loop() function knows it's okay to use it
+    
+    // Set our DMP Ready flag so the main loop() function knows it's okay to use it
     PrintCodeSerial(5000,"HAT BEGIN",true);
     dmpReady = true;
-    // get expected DMP packet size for later comparison
+    
+    // Get expected DMP packet size for later comparison
     packetSize = mpu.dmpGetFIFOPacketSize();    
     // Empty FIFO
     fifoCount = mpu.getFIFOCount();
@@ -161,7 +158,7 @@ void setup() {
   } 
   else {
     // ERROR!
-    // 1 = initial memory load failed
+    // 1 = Initial memory load failed
     // 2 = DMP configuration updates failed
     // (if it's going to break, usually the code will be 1)
     dmpLoaded=false;
@@ -169,25 +166,23 @@ void setup() {
   }
 }
 
-
 // ================================================================
-// ===                    RAZ OFFSET                            ===
+// ===               RESET CALIBRATION OFFSETS                  ===
 // ================================================================
-void razoffset() {
-  eprom_save.gyro_offset[0] = 0;
-  eprom_save.gyro_offset[1] = 0;
-  eprom_save.gyro_offset[2] = 0;
-  eprom_save.acc_offset[0] = 0;
-  eprom_save.acc_offset[1] = 0;
-  eprom_save.acc_offset[2] = 0;
+void ResetCalibrationOffsets() {
+  calibrationData.gyro_offset[0] = 0;
+  calibrationData.gyro_offset[1] = 0;
+  calibrationData.gyro_offset[2] = 0;
+  calibrationData.acc_offset[0] = 0;
+  calibrationData.acc_offset[1] = 0;
+  calibrationData.acc_offset[2] = 0;
 }
 
 // ================================================================
 // ===                    READ CALIBRATION DATA                 ===
 // ================================================================
-
-void ReadCalibrationData() {
-  _eprom_save eprom_data;
+void ReadEepromOffsetData() {
+  _sensor_data eprom_data;
   eeprom_read_block( (void*)&eprom_data, (void*) EEPROM_BASE, sizeof(eprom_data));
   if (eprom_data.sig_hat == EEPROM_SIGNATURE) {
     mpu.setXAccelOffset(eprom_data.acc_offset[0]);
@@ -196,11 +191,17 @@ void ReadCalibrationData() {
     mpu.setXGyroOffset(eprom_data.gyro_offset[0]);
     mpu.setYGyroOffset(eprom_data.gyro_offset[1]);
     mpu.setZGyroOffset(eprom_data.gyro_offset[2]);
-    Serial.println(eprom_data.acc_offset[0]);
-    Serial.println(eprom_data.acc_offset[1]);
+    Serial.println("Accelerometers offsets loaded from EEPROM");
+    Serial.print(eprom_data.acc_offset[0]);
+    Serial.print(", ");
+    Serial.print(eprom_data.acc_offset[1]);
+    Serial.print(", ");
     Serial.println(eprom_data.acc_offset[2]);
-    Serial.println(eprom_data.gyro_offset[0]);
-    Serial.println(eprom_data.gyro_offset[1]);
+    Serial.println("Gyroscopes offsets loaded from EEPROM");
+    Serial.print(eprom_data.gyro_offset[0]);
+    Serial.print(", ");
+    Serial.print(eprom_data.gyro_offset[1]);
+    Serial.print(", ");
     Serial.println(eprom_data.gyro_offset[2]);
   }
 }
@@ -209,13 +210,13 @@ void ReadCalibrationData() {
 // ===                    Serial Command                        ===
 // ================================================================
 void serialEvent(){
-  Commande = (char)Serial.read();
-  switch (Commande) {
+  command = (char)Serial.read();
+  switch (command) {
   case 'S':
     PrintCodeSerial(5001,"HAT START",true);
     if (dmpLoaded==true) {
       mpu.resetFIFO();   
-      hatire.Cpt=0;              
+      hatData.cpt=0;              
       attachInterrupt(0, dmpDataReady, RISING);
       mpu.setDMPEnabled(true);
       dmpReady = true;
@@ -240,7 +241,7 @@ void serialEvent(){
       mpu.setDMPEnabled(false);
       detachInterrupt(0);
       mpu.resetFIFO();   
-      hatire.Cpt=0;              
+      hatData.cpt=0;              
       dmpReady = false;
       setup();
     } 
@@ -250,31 +251,31 @@ void serialEvent(){
     break;      
 
   case 'C':
-    CptCal=0;
-    razoffset();  
-    AskCalibrate=true;
+    cptCal=0;
+    ResetCalibrationOffsets();  
+    askCalibrate=true;
     break;      
 
   case 'V':
-    PrintCodeSerial(2000,Version,true);
+    PrintCodeSerial(2000,version,true);
     break;      
 
   case 'I':
   	Serial.println();
   	Serial.print("Version : \t");
-    Serial.println(Version);
+    Serial.println(version);
     Serial.println("Gyroscopes offsets");
     for (int i=0; i <= 2; i++) {
   	  Serial.print(i);
   	  Serial.print(" : ");
-    	Serial.print(eprom_save.gyro_offset[i]);
+    	Serial.print(calibrationData.gyro_offset[i]);
   	  Serial.println();
     }
     Serial.println("Accelerometers offsets");
     for (int i=0; i <= 2; i++) {
   	  Serial.print(i);
   	  Serial.print(" : ");
-    	Serial.print(eprom_save.acc_offset[i]);
+    	Serial.print(calibrationData.acc_offset[i]);
   	  Serial.println();
     }
     break;      
@@ -284,7 +285,6 @@ void serialEvent(){
   }	
 }
 
-
 // ================================================================
 // ===                    MAIN PROGRAM LOOP                     ===
 // ================================================================
@@ -292,99 +292,88 @@ void loop() {
   // Leonardo BUG (simul Serial Event)
   if(Serial.available() > 0)  serialEvent();
 
-  // if programming failed, don't try to do anything
+  // If programming failed, don't try to do anything
   if (dmpReady)  { 
 
     while (!mpuInterrupt && fifoCount < packetSize) ;
 
-    // reset interrupt flag and get INT_STATUS byte
+    // Reset interrupt flag and get INT_STATUS byte
     mpuInterrupt = false;
     mpuIntStatus = mpu.getIntStatus();
 
-    // get current FIFO count
+    // Get current FIFO count
     fifoCount = mpu.getFIFOCount();
 
-    // check for overflow (this should never happen unless our code is too inefficient)
+    // Check for overflow (this should never happen unless our code is too inefficient)
     if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
-      // reset so we can continue cleanly
+      // Reset so we can continue cleanly
       mpu.resetFIFO();
       PrintCodeSerial(9010,"Overflow FIFO DMP",true);
-      hatire.Cpt=0;
-
-      // otherwise, check for DMP data ready interrupt (this should happen frequently)
+      hatData.cpt=0;
+      // Otherwise, check for DMP data ready interrupt (this should happen frequently)
     }
     else if (mpuIntStatus & 0x02) {
-      // wait for correct available data length, should be a VERY short wait
+      // Wait for correct available data length, should be a VERY short wait
       while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
 
-      // read a packet from FIFO
+      // Read a packet from FIFO
       mpu.getFIFOBytes(fifoBuffer, packetSize);
 
-      // track FIFO count here in case there is > 1 packet available
+      // Track FIFO count here in case there is > 1 packet available
       // (this lets us immediately read more without waiting for an interrupt)
       fifoCount -= packetSize;
 
       // Get Euler angles in degrees
       mpu.dmpGetQuaternion(&q, fifoBuffer);
       mpu.dmpGetGravity(&gravity, &q);
-      mpu.dmpGetYawPitchRoll(hatire.gyro, &q, &gravity);
+      mpu.dmpGetYawPitchRoll(hatData.gyro, &q, &gravity);
 
       // Get real acceleration, adjusted to remove gravity
       // not used in this script
-      // mpu.dmpGetAccel(&aa, fifoBuffer);
-      // mpu.dmpGetLinearAccel(&hatire.acc, &aa, &gravity);
-//      Serial.println(mpu.getXNegMotionDetected());
-//      Serial.println(mpu.getXPosMotionDetected());
-//      Serial.println(mpu.getYNegMotionDetected());
-//      Serial.println(mpu.getYPosMotionDetected());
-//      Serial.println(mpu.getZNegMotionDetected());
-//      Serial.println(mpu.getZPosMotionDetected());
+      // mpu.dmpGetAccel(&acc, fifoBuffer);
+      // mpu.dmpGetLinearAccel(&hatData.acc, &acc, &gravity);
 
-      // Calibration sur X mesures  
-      if (AskCalibrate) {
-        if ( CptCal>=NbCal) {
-          CptCal=0;
-          eprom_save.gyro_offset[0] = eprom_save.gyro_offset[0] / NbCal ;
-          eprom_save.gyro_offset[1] = eprom_save.gyro_offset[1] / NbCal ;
-          eprom_save.gyro_offset[2] = eprom_save.gyro_offset[2] / NbCal ;
-          AskCalibrate=false;
+      if (askCalibrate) {
+        if ( cptCal>=numCalibrationSteps) {
+          cptCal=0;
+          calibrationData.gyro_offset[0] = calibrationData.gyro_offset[0] / numCalibrationSteps ;
+          calibrationData.gyro_offset[1] = calibrationData.gyro_offset[1] / numCalibrationSteps ;
+          calibrationData.gyro_offset[2] = calibrationData.gyro_offset[2] / numCalibrationSteps ;
+          askCalibrate=false;
         } 
         else {
-          eprom_save.gyro_offset[0] += (float) hatire.gyro[0];
-          eprom_save.gyro_offset[1] += (float) hatire.gyro[1];
-          eprom_save.gyro_offset[2] += (float) hatire.gyro[2];
+          calibrationData.gyro_offset[0] += (float) hatData.gyro[0];
+          calibrationData.gyro_offset[1] += (float) hatData.gyro[1];
+          calibrationData.gyro_offset[2] += (float) hatData.gyro[2];
 
-          CptCal++;
+          cptCal++;
         }
       }
 
       // Conversion angles Euler en +-180 Degrees
       for (int i=0; i <= 2; i++) {
-        hatire.gyro[i]= (hatire.gyro[i] - eprom_save.gyro_offset[i] ) * Rad2Deg;
-        if  (hatire.gyro[i]>180) {
-          hatire.gyro[i] = hatire.gyro[i] - 360;
+        hatData.gyro[i]= (hatData.gyro[i] - calibrationData.gyro_offset[i] ) * Rad2Deg;
+        if  (hatData.gyro[i]>180) {
+          hatData.gyro[i] = hatData.gyro[i] - 360;
         }
       }
 
-      if (AskCalibrate) {
-        hatire.gyro[0] = 0; 
-        hatire.gyro[1] = 0;
-        hatire.gyro[2] = 0;
-        hatire.acc[0]= 0;
-        hatire.acc[1] = 0;
-        hatire.acc[2] = 0;
+      if (askCalibrate) {
+        hatData.gyro[0] = 0; 
+        hatData.gyro[1] = 0;
+        hatData.gyro[2] = 0;
+        hatData.acc[0]= 0;
+        hatData.acc[1] = 0;
+        hatData.acc[2] = 0;
       }
 
-      // Send Trame to HATIRE PC
-      Serial.write((byte*)&hatire,30);
+      Serial.write((byte*)&hatData,30);
 
-      hatire.Cpt++;
-      if (hatire.Cpt>999) {
-        hatire.Cpt=0;
+      hatData.cpt++;
+      if (hatData.cpt>999) {
+        hatData.cpt=0;
       }
     }
   }
   delay(1);
 }
-
-
