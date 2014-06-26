@@ -358,7 +358,7 @@ void loop() {
         }
       }
 
-      // Conversion angles Euler en +-180 Degr�es
+      // Conversion angles Euler en +-180 Degrees
       for (int i=0; i <= 2; i++) {
         hatire.gyro[i]= (hatire.gyro[i] - eprom_save.gyro_offset[i] ) * Rad2Deg;
         if  (hatire.gyro[i]>180) {
