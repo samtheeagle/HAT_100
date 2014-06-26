@@ -10,7 +10,7 @@
 #include <avr/eeprom.h>
 #include <Wire.h>
 #include "I2Cdev.h"
-#include "MPU6050_9Axis_MotionApps41.h"
+#include "MPU6050_6Axis_MotionApps20.h"
 
 MPU6050 mpu;
 
@@ -130,7 +130,7 @@ void setup() {
   if (devStatus == 0) {
     dmpLoaded=true;
     // Read custom offset values, saved into eeprom by calibration sketch, for the specific mpu-6050 device
-    PrintCodeSerial(3005,"Reading saved offset params from EEPROM...",true);
+    PrintCodeSerial(3005,"Reading EEPROM data...",true);
     ReadEepromOffsetData();
     
     // Turn on the DMP, now that it's ready
