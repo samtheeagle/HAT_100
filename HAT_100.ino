@@ -1,8 +1,8 @@
-// Arduino sketch for MPU6050 using DMP MotionApps v4.1 
-// HAT 26/06/2014 by samtheeagle
-// HAT 14/04/2013 by FuraX49
+// Arduino sketch for MPU6050 using DMP MotionApps v4.1
+// HAT V2.00 26/06/2014 by samtheeagle
+// HAT V1.00 14/04/2013 by FuraX49
 //
-// Head Arduino Tracker for FaceTrackNoIR 
+// Head Arduino Tracker (HAT) for FaceTrackNoIR 
 //   http://facetracknoir.sourceforge.net/home/default.htm	
 // I2C device class (I2Cdev)
 //   https://github.com/jrowberg/i2cdevlib
@@ -12,7 +12,11 @@
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
-MPU6050 mpu;
+#define EEPROM_BASE       0xA0
+#define EEPROM_SIGNATURE  0x55
+const char version[] = "HAT V 2.00";
+const float Rad2Deg = (180/M_PI) ;
+const int  quickCalibrationSteps = 200;
 
 typedef struct  {
   int16_t  begin  ;   // 2  Begin
@@ -36,37 +40,24 @@ typedef struct
   double acc_offset[3];
 } _sensor_data;
 
-#define EEPROM_BASE       0xA0
-#define EEPROM_SIGNATURE  0x55
-
-float Rad2Deg = (180/M_PI) ;
-
-// MPU control/status vars
-bool dmpReady = false;   // Set true if DMP init was successful
-bool dmpLoaded = false;  // Set true if DMP loaded  successfuly
-uint8_t mpuIntStatus;    // Holds actual interrupt status byte from MPU
-uint8_t devStatus;       // Return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;     // Expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;      // Count of all bytes currently in FIFO
-uint8_t fifoBuffer[64];  // FIFO storage buffer
-
-char command;
-char version[] = "HAT V 1.00";
-
-// Orientation/motion vars
-Quaternion q;           // [w, x, y, z] Quaternion container
-VectorInt16 acc;        // [x, y, z]    Accel sensor measurements
-VectorFloat gravity;    // [x, y, z]    Gravity vector
-
-_hat_data_packet hatData;
-_msg_info msgInfo;
-_sensor_data calibrationData;
-
-bool       askCalibrate = false;  // Set true when calibrating is requested
-int        cptCal =  0;
-const int  numCalibrationSteps = 200;
-
+MPU6050 mpu;
 volatile bool mpuInterrupt = false;  // Indicates whether MPU interrupt pin has gone high
+
+bool dmpReady = false;               // Set true if DMP init was successful
+bool dmpLoaded = false;              // Set true if DMP loaded  successfully
+bool askQuickCalibrate = false;      // Set true if quick calibration is requested
+int quickCalibrateStep =  0;         // The current quick calibrate stemp number.
+uint8_t mpuIntStatus;                // Holds actual interrupt status byte from MPU
+uint8_t devStatus;                   // Return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;                 // Expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;                  // Count of all bytes currently in FIFO
+uint8_t fifoBuffer[64];              // FIFO storage buffer
+Quaternion q;                        // [w, x, y, z] Quaternion container
+VectorInt16 acc;                     // [x, y, z]    Accel sensor measurements
+VectorFloat gravity;                 // [x, y, z]    Gravity vector
+_hat_data_packet hatData;            // HAT data packet to send over serial connection
+_msg_info msgInfo;                   // Message packet to send over serial connection
+_sensor_data quickCalibrationData;   // Sensor data values calculated by quick calibration
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -76,14 +67,18 @@ void dmpDataReady() {
 }
 
 // ================================================================
-// ===               PRINT SERIAL FORMATTE                      ===
+// ===               PRINT SERIAL MESSAGE                       ===
 // ================================================================
-void PrintCodeSerial(uint16_t code,char msg[24],bool EOL ) {
+void PrintCodeSerial(uint16_t code, char msg[24], bool EOL ) {
   msgInfo.code=code;
   memset(msgInfo.msg,0x00,24);
   strcpy(msgInfo.msg,msg);
   if (EOL) msgInfo.msg[23]=0x0A;
   Serial.write((byte*)&msgInfo,30);
+}
+
+void PrintCodeSerial(uint16_t code, const char msg[24], bool EOL ) {
+  PrintCodeSerial(code, msg, EOL);
 }
 
 // ================================================================
@@ -166,15 +161,15 @@ void setup() {
 }
 
 // ================================================================
-// ===               RESET CALIBRATION OFFSETS                  ===
+// ===           RESET QUICK CALIBRATION OFFSETS                ===
 // ================================================================
-void ResetCalibrationOffsets() {
-  calibrationData.gyro_offset[0] = 0;
-  calibrationData.gyro_offset[1] = 0;
-  calibrationData.gyro_offset[2] = 0;
-  calibrationData.acc_offset[0] = 0;
-  calibrationData.acc_offset[1] = 0;
-  calibrationData.acc_offset[2] = 0;
+void ResetQuickCalibrationOffsets() {
+  quickCalibrationData.gyro_offset[0] = 0;
+  quickCalibrationData.gyro_offset[1] = 0;
+  quickCalibrationData.gyro_offset[2] = 0;
+  quickCalibrationData.acc_offset[0] = 0;
+  quickCalibrationData.acc_offset[1] = 0;
+  quickCalibrationData.acc_offset[2] = 0;
 }
 
 // ================================================================
@@ -190,13 +185,13 @@ void ReadEepromOffsetData() {
     mpu.setXGyroOffset(eprom_data.gyro_offset[0]);
     mpu.setYGyroOffset(eprom_data.gyro_offset[1]);
     mpu.setZGyroOffset(eprom_data.gyro_offset[2]);
-    Serial.println("Accelerometers offsets loaded from EEPROM");
+    Serial.println("MPU accelerometers offsets loaded from EEPROM");
     Serial.print(eprom_data.acc_offset[0]);
     Serial.print(", ");
     Serial.print(eprom_data.acc_offset[1]);
     Serial.print(", ");
     Serial.println(eprom_data.acc_offset[2]);
-    Serial.println("Gyroscopes offsets loaded from EEPROM");
+    Serial.println("MPU gyroscopes offsets loaded from EEPROM");
     Serial.print(eprom_data.gyro_offset[0]);
     Serial.print(", ");
     Serial.print(eprom_data.gyro_offset[1]);
@@ -209,7 +204,7 @@ void ReadEepromOffsetData() {
 // ===                    Serial Command                        ===
 // ================================================================
 void serialEvent(){
-  command = (char)Serial.read();
+  char command = (char)Serial.read();
   switch (command) {
   case 'S':
     PrintCodeSerial(5001,"HAT START",true);
@@ -249,10 +244,10 @@ void serialEvent(){
     }
     break;      
 
-  case 'C':
-    cptCal=0;
-    ResetCalibrationOffsets();  
-    askCalibrate=true;
+  case 'Q':
+    quickCalibrateStep=0;
+    ResetQuickCalibrationOffsets();  
+    askQuickCalibrate=true;
     break;      
 
   case 'V':
@@ -267,14 +262,14 @@ void serialEvent(){
     for (int i=0; i <= 2; i++) {
   	  Serial.print(i);
   	  Serial.print(" : ");
-    	Serial.print(calibrationData.gyro_offset[i]);
+    	Serial.print(quickCalibrationData.gyro_offset[i]);
   	  Serial.println();
     }
     Serial.println("Accelerometers offsets");
     for (int i=0; i <= 2; i++) {
   	  Serial.print(i);
   	  Serial.print(" : ");
-    	Serial.print(calibrationData.acc_offset[i]);
+    	Serial.print(quickCalibrationData.acc_offset[i]);
   	  Serial.println();
     }
     break;      
@@ -328,36 +323,35 @@ void loop() {
       mpu.dmpGetYawPitchRoll(hatData.gyro, &q, &gravity);
 
       // Get real acceleration, adjusted to remove gravity
-      // not used in this script
-      // mpu.dmpGetAccel(&acc, fifoBuffer);
-      // mpu.dmpGetLinearAccel(&hatData.acc, &acc, &gravity);
+      VectorInt16 linearAcc;
+      mpu.dmpGetAccel(&acc, fifoBuffer);
+      mpu.dmpGetLinearAccel(&linearAcc, &acc, &gravity);
 
-      if (askCalibrate) {
-        if ( cptCal>=numCalibrationSteps) {
-          cptCal=0;
-          calibrationData.gyro_offset[0] = calibrationData.gyro_offset[0] / numCalibrationSteps ;
-          calibrationData.gyro_offset[1] = calibrationData.gyro_offset[1] / numCalibrationSteps ;
-          calibrationData.gyro_offset[2] = calibrationData.gyro_offset[2] / numCalibrationSteps ;
-          askCalibrate=false;
+      if (askQuickCalibrate) {
+        if (quickCalibrateStep >= quickCalibrationSteps) {
+          quickCalibrateStep=0;
+          quickCalibrationData.gyro_offset[0] = quickCalibrationData.gyro_offset[0] / quickCalibrationSteps ;
+          quickCalibrationData.gyro_offset[1] = quickCalibrationData.gyro_offset[1] / quickCalibrationSteps ;
+          quickCalibrationData.gyro_offset[2] = quickCalibrationData.gyro_offset[2] / quickCalibrationSteps ;
+          askQuickCalibrate=false;
         } 
         else {
-          calibrationData.gyro_offset[0] += (float) hatData.gyro[0];
-          calibrationData.gyro_offset[1] += (float) hatData.gyro[1];
-          calibrationData.gyro_offset[2] += (float) hatData.gyro[2];
-
-          cptCal++;
+          quickCalibrationData.gyro_offset[0] += (float) hatData.gyro[0];
+          quickCalibrationData.gyro_offset[1] += (float) hatData.gyro[1];
+          quickCalibrationData.gyro_offset[2] += (float) hatData.gyro[2];
+          quickCalibrateStep++;
         }
       }
 
       // Conversion angles Euler en +-180 Degrees
       for (int i=0; i <= 2; i++) {
-        hatData.gyro[i]= (hatData.gyro[i] - calibrationData.gyro_offset[i] ) * Rad2Deg;
+        hatData.gyro[i]= (hatData.gyro[i] - quickCalibrationData.gyro_offset[i] ) * Rad2Deg;
         if  (hatData.gyro[i]>180) {
           hatData.gyro[i] = hatData.gyro[i] - 360;
         }
       }
 
-      if (askCalibrate) {
+      if (askQuickCalibrate) {
         hatData.gyro[0] = 0; 
         hatData.gyro[1] = 0;
         hatData.gyro[2] = 0;
