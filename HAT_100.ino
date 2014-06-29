@@ -14,9 +14,18 @@
 
 #define EEPROM_BASE       0xA0
 #define EEPROM_SIGNATURE  0x55
-const char version[] = "HAT V 2.00";
-const float Rad2Deg = (180/M_PI) ;
+char version[] = "HAT V 2.00";
+const float Rad2Deg = (180/M_PI);
 const int  quickCalibrationSteps = 200;
+const float accThreshold = 50;
+const int accDuration = 100;
+
+unsigned long xPosDetectTime = 0;
+unsigned long xNegDetectTime = 0;
+unsigned long yPosDetectTime = 0;
+unsigned long yNegDetectTime = 0;
+unsigned long zPosDetectTime = 0;
+unsigned long zNegDetectTime = 0;
 
 typedef struct  {
   int16_t  begin  ;   // 2  Begin
@@ -77,9 +86,9 @@ void PrintCodeSerial(uint16_t code, char msg[24], bool EOL ) {
   Serial.write((byte*)&msgInfo,30);
 }
 
-void PrintCodeSerial(uint16_t code, const char msg[24], bool EOL ) {
-  PrintCodeSerial(code, msg, EOL);
-}
+//void PrintCodeSerial(uint16_t code, const char msg[24], bool EOL ) {
+//  PrintCodeSerial(code, msg, EOL);
+//}
 
 // ================================================================
 // ===                      INITIAL SETUP                       ===
@@ -120,6 +129,8 @@ void setup() {
   // Load and configure the DMP
   PrintCodeSerial(3004,"Initializing DMP...",true);
   devStatus = mpu.dmpInitialize();
+  
+  mpu.setFullScaleAccelRange(0);
 
   // Make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -201,9 +212,93 @@ void ReadEepromOffsetData() {
 }
 
 // ================================================================
+// ===               HANDLE X ACCELERATION                      ===
+// ================================================================
+void HandleXAcc(unsigned long now, float accX) {
+  if(abs(accX) < accThreshold) {  // If movement is below threshold.
+    if(xPosDetectTime > 0) {      // If movement in the X positive direction was occurring.
+      unsigned long delta = now - xPosDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[0]++;
+      }
+    }
+    if(xNegDetectTime > 0) {      // If movement in the X negative direction was occurring.
+      unsigned long delta = now - xNegDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[0]--;
+      }
+    }
+    xPosDetectTime = 0;
+    xNegDetectTime = 0;
+  }
+  if(accX >= accThreshold && xPosDetectTime == 0) {  // Record X positive movement start time.
+    xPosDetectTime = now;
+  }
+  if(accX <= -accThreshold && xNegDetectTime == 0) { // Record X negative movement start time.
+    xNegDetectTime = now;
+  }
+}
+
+// ================================================================
+// ===               HANDLE Y ACCELERATION                      ===
+// ================================================================
+void HandleYAcc(unsigned long now, float accY) {
+  if(abs(accY) < accThreshold) {  // If movement is below threshold.
+    if(yPosDetectTime > 0) {      // If movement in the Y positive direction was occurring.
+      unsigned long delta = now - yPosDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[1]++;
+      }
+    }
+    if(yNegDetectTime > 0) {      // If movement in the Y negative direction was occurring.
+      unsigned long delta = now - yNegDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[1]--;
+      }
+    }
+    yPosDetectTime = 0;
+    yNegDetectTime = 0;
+  }
+  if(accY >= accThreshold && yPosDetectTime == 0) {  // Record Y positive movement start time.
+    yPosDetectTime = now;
+  }
+  if(accY <= -accThreshold && yNegDetectTime == 0) { // Record Y negative movement start time.
+    yNegDetectTime = now;
+  }
+}
+
+// ================================================================
+// ===               HANDLE Z ACCELERATION                      ===
+// ================================================================
+void HandleZAcc(unsigned long now, float accZ) {
+  if(abs(accZ) < accThreshold) {  // If movement is below threshold.
+    if(zPosDetectTime > 0) {      // If movement in the Z positive direction was occurring.
+      unsigned long delta = now - zPosDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[2]++;
+      }
+    }
+    if(zNegDetectTime > 0) {      // If movement in the Z negative direction was occurring.
+      unsigned long delta = now - zNegDetectTime;
+      if(delta > accDuration) {
+        hatData.acc[2]--;
+      }
+    }
+    zPosDetectTime = 0;
+    zNegDetectTime = 0;
+  }
+  if(accZ >= accThreshold && zPosDetectTime == 0) {  // Record Z positive movement start time.
+    zPosDetectTime = now;
+  }
+  if(accZ <= -accThreshold && zNegDetectTime == 0) { // Record Z negative movement start time.
+    zNegDetectTime = now;
+  }
+}
+
+// ================================================================
 // ===                    Serial Command                        ===
 // ================================================================
-void serialEvent(){
+void SerialEvent(){
   char command = (char)Serial.read();
   switch (command) {
   case 'S':
@@ -244,7 +339,7 @@ void serialEvent(){
     }
     break;      
 
-  case 'Q':
+  case 'C':
     quickCalibrateStep=0;
     ResetQuickCalibrationOffsets();  
     askQuickCalibrate=true;
@@ -284,7 +379,7 @@ void serialEvent(){
 // ================================================================
 void loop() {
   // Leonardo BUG (simul Serial Event)
-  if(Serial.available() > 0)  serialEvent();
+  if(Serial.available() > 0)  SerialEvent();
 
   // If programming failed, don't try to do anything
   if (dmpReady)  { 
@@ -326,13 +421,17 @@ void loop() {
       VectorInt16 linearAcc;
       mpu.dmpGetAccel(&acc, fifoBuffer);
       mpu.dmpGetLinearAccel(&linearAcc, &acc, &gravity);
-
+      unsigned long now = millis();
+      HandleXAcc(now, linearAcc.x / 10.0);
+      HandleYAcc(now, linearAcc.y / 10.0);
+      HandleZAcc(now, linearAcc.z / 10.0);
+      
       if (askQuickCalibrate) {
         if (quickCalibrateStep >= quickCalibrationSteps) {
           quickCalibrateStep=0;
-          quickCalibrationData.gyro_offset[0] = quickCalibrationData.gyro_offset[0] / quickCalibrationSteps ;
-          quickCalibrationData.gyro_offset[1] = quickCalibrationData.gyro_offset[1] / quickCalibrationSteps ;
-          quickCalibrationData.gyro_offset[2] = quickCalibrationData.gyro_offset[2] / quickCalibrationSteps ;
+          quickCalibrationData.gyro_offset[0] = quickCalibrationData.gyro_offset[0] / quickCalibrationSteps;
+          quickCalibrationData.gyro_offset[1] = quickCalibrationData.gyro_offset[1] / quickCalibrationSteps;
+          quickCalibrationData.gyro_offset[2] = quickCalibrationData.gyro_offset[2] / quickCalibrationSteps;
           askQuickCalibrate=false;
         } 
         else {
