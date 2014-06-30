@@ -17,7 +17,7 @@
 char version[] = "HAT V 2.00";
 const float Rad2Deg = (180/M_PI);
 const int  quickCalibrationSteps = 200;
-const float accThreshold = 50;
+const float accThreshold = 40;
 const int accDuration = 100;
 
 unsigned long xPosDetectTime = 0;
@@ -231,10 +231,10 @@ void HandleXAcc(unsigned long now, float accX) {
     xPosDetectTime = 0;
     xNegDetectTime = 0;
   }
-  if(accX >= accThreshold && xPosDetectTime == 0) {  // Record X positive movement start time.
+  else if(accX >= accThreshold && xPosDetectTime == 0) {  // Record X positive movement start time.
     xPosDetectTime = now;
   }
-  if(accX <= -accThreshold && xNegDetectTime == 0) { // Record X negative movement start time.
+  else if(accX <= -accThreshold && xNegDetectTime == 0) { // Record X negative movement start time.
     xNegDetectTime = now;
   }
 }
@@ -259,10 +259,10 @@ void HandleYAcc(unsigned long now, float accY) {
     yPosDetectTime = 0;
     yNegDetectTime = 0;
   }
-  if(accY >= accThreshold && yPosDetectTime == 0) {  // Record Y positive movement start time.
+  else if(accY >= accThreshold && yPosDetectTime == 0) {  // Record Y positive movement start time.
     yPosDetectTime = now;
   }
-  if(accY <= -accThreshold && yNegDetectTime == 0) { // Record Y negative movement start time.
+  else if(accY <= -accThreshold && yNegDetectTime == 0) { // Record Y negative movement start time.
     yNegDetectTime = now;
   }
 }
@@ -287,10 +287,10 @@ void HandleZAcc(unsigned long now, float accZ) {
     zPosDetectTime = 0;
     zNegDetectTime = 0;
   }
-  if(accZ >= accThreshold && zPosDetectTime == 0) {  // Record Z positive movement start time.
+  else if(accZ >= accThreshold && zPosDetectTime == 0) {  // Record Z positive movement start time.
     zPosDetectTime = now;
   }
-  if(accZ <= -accThreshold && zNegDetectTime == 0) { // Record Z negative movement start time.
+  else if(accZ <= -accThreshold && zNegDetectTime == 0) { // Record Z negative movement start time.
     zNegDetectTime = now;
   }
 }
