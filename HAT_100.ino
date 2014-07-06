@@ -16,7 +16,7 @@
 #define EEPROM_SIGNATURE  0x55
 char version[] = "HAT V 2.00";
 const float Rad2Deg = (180/M_PI);
-const int  quickCalibrationSteps = 200;
+const int quickCalibrationSteps = 200;
 const float accThreshold = 40;
 const int accDuration = 100;
 
@@ -30,7 +30,7 @@ unsigned long zNegDetectTime = 0;
 typedef struct  {
   int16_t  begin  ;   // 2  Begin
   uint16_t cpt ;      // 2  Compteur Frame or Code info or error
-  float    gyro[3];   // 12 [Y, P, R] Gyro
+  float    gyro[3];   // 12 [Y, P, R] Gyro - MPU6050 defines these as Yaw about Z axis, Pitch about Y axis, Roll about X axis
   float    acc[3];    // 12 [x, y, z] Acc
   int16_t  end ;      // 2  End
 } _hat_data_packet;
@@ -45,8 +45,8 @@ typedef struct  {
 typedef struct 
 {
   byte   sig_hat;
-  double gyro_offset[3];
-  double acc_offset[3];
+  double gyro_offset[3];  // [Y, P, R] Gyro
+  double acc_offset[3];   // [x, y, z] Acc
 } _sensor_data;
 
 MPU6050 mpu;
@@ -130,7 +130,8 @@ void setup() {
   PrintCodeSerial(3004,"Initializing DMP...",true);
   devStatus = mpu.dmpInitialize();
   
-  mpu.setFullScaleAccelRange(0);
+  mpu.setFullScaleAccelRange(0); // 0 = +/- 2g
+  mpu.setFullScaleGyroRange(3);  // 3 = +/- 2000 degrees/sec
 
   // Make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -416,15 +417,27 @@ void loop() {
       mpu.dmpGetQuaternion(&q, fifoBuffer);
       mpu.dmpGetGravity(&gravity, &q);
       mpu.dmpGetYawPitchRoll(hatData.gyro, &q, &gravity);
+      
+//      Serial.print("\n");
+//      Serial.print(hatData.gyro[0]);
+//      Serial.print(", ");
+//      Serial.print(hatData.gyro[1]);
+//      Serial.print(", ");
+//      Serial.print(hatData.gyro[2]);
+//      Serial.print("\n");
 
       // Get real acceleration, adjusted to remove gravity
       VectorInt16 linearAcc;
       mpu.dmpGetAccel(&acc, fifoBuffer);
       mpu.dmpGetLinearAccel(&linearAcc, &acc, &gravity);
-      unsigned long now = millis();
-      HandleXAcc(now, linearAcc.x / 10.0);
-      HandleYAcc(now, linearAcc.y / 10.0);
-      HandleZAcc(now, linearAcc.z / 10.0);
+      
+      hatData.acc[0]= acc.x / 1000.0;
+      hatData.acc[1] = acc.y / 1000.0;
+      hatData.acc[2] = acc.z / 1000.0;
+//      unsigned long now = millis();
+//      HandleXAcc(now, linearAcc.x / 10.0);
+//      HandleYAcc(now, linearAcc.y / 10.0);
+//      HandleZAcc(now, linearAcc.z / 10.0);
       
       if (askQuickCalibrate) {
         if (quickCalibrateStep >= quickCalibrationSteps) {
