@@ -130,8 +130,11 @@ void setup() {
   PrintCodeSerial(3004,"Initializing DMP...",true);
   devStatus = mpu.dmpInitialize();
   
-  mpu.setFullScaleAccelRange(0); // 0 = +/- 2g
-  mpu.setFullScaleGyroRange(3);  // 3 = +/- 2000 degrees/sec
+  // To test... 
+  // Edit MPU6050_6Axis_MotionApps20.h - MPU6050::dmpInitialize()
+  //   setIntEnabled(0x82); to enable the motion detection interrupt.
+  //
+  // Adjust setMotionDetectionThreshold() and setMotionDetectionDuration() to see what happens.
 
   // Make sure it worked (returns 0 if so)
   if (devStatus == 0) {
