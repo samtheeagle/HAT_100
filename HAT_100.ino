@@ -130,11 +130,10 @@ void setup() {
   PrintCodeSerial(3004,"Initializing DMP...",true);
   devStatus = mpu.dmpInitialize();
   
-  // To test... 
-  // Edit MPU6050_6Axis_MotionApps20.h - MPU6050::dmpInitialize()
-  //   setIntEnabled(0x82); to enable the motion detection interrupt.
-  //
-  // Adjust setMotionDetectionThreshold() and setMotionDetectionDuration() to see what happens.
+//  mpu.setMotionDetectionThreshold(250);      // units of 2mg ie Two milli-g's, so half a G
+//  mpu.setMotionDetectionDuration(50);        // ms
+//  mpu.setIntMotionEnabled(true);
+//  mpu.setIntDataReadyEnabled(true);
 
   // Make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -405,6 +404,25 @@ void loop() {
       hatData.cpt=0;
       // Otherwise, check for DMP data ready interrupt (this should happen frequently)
     }
+//    else if (mpuIntStatus & 0x40) {
+//      Serial.print("\nMotion Interrupt Detected!\n");
+//      // Wait for correct available data length, should be a VERY short wait
+//      while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+//
+//      // Read a packet from FIFO
+//      mpu.getFIFOBytes(fifoBuffer, packetSize);
+//
+//      // Track FIFO count here in case there is > 1 packet available
+//      // (this lets us immediately read more without waiting for an interrupt)
+//      fifoCount -= packetSize;
+//      
+//      mpu.dmpGetGravity(&gravity, &q);
+//      mpu.dmpGetAccel(&acc, fifoBuffer);
+//      
+//      hatData.acc[0]= acc.x / 1000.0;
+//      hatData.acc[1] = acc.y / 1000.0;
+//      hatData.acc[2] = acc.z / 1000.0;
+//    }
     else if (mpuIntStatus & 0x02) {
       // Wait for correct available data length, should be a VERY short wait
       while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
